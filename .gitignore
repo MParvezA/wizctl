@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+node_modules/
+frontend/dist/
+frontend/tsconfig.tsbuildinfo
+
+.DS_Store
