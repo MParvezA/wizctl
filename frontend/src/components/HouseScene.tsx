@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { reportedState, type LightSnapshots } from "./BulbSubscription";
 import { RoomLight, lightAppearance } from "./RoomLight";
@@ -39,31 +38,21 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
     try { renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); }
     catch { setFailed(true); return; }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.8));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.2;
     renderer.domElement.setAttribute("aria-label", "Single-floor apartment based on your sketch");
     element.prepend(renderer.domElement);
     const scene = new THREE.Scene();
-    const generator = new THREE.PMREMGenerator(renderer);
-    const environment = new RoomEnvironment();
-    const environmentTarget = generator.fromScene(environment);
-    scene.environment = environmentTarget.texture;
-    scene.environmentIntensity = .24;
-    environment.dispose(); generator.dispose();
     const camera = new THREE.OrthographicCamera(-7, 7, 7, -7, .1, 100);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enablePan = false; controls.minZoom = .75; controls.maxZoom = 2;
     controls.minPolarAngle = 0; controls.maxPolarAngle = Math.PI / 3;
     const reset = () => { camera.position.set(7.5, 15, 11); camera.zoom = 1; camera.updateProjectionMatrix(); controls.target.set(0, 0, 0); controls.update(); };
     reset();
-    const ambient = new THREE.HemisphereLight(0xe1edf1, 0x283d33, .65);
+    // Uniform neutral visibility; only reported bulb state supplies room color.
+    const ambient = new THREE.AmbientLight(0xffffff, 1.4);
     scene.add(ambient);
-    let targetAmbient = .65, targetSun = 1.6, targetEnvironment = .24;
-    const sun = new THREE.DirectionalLight(0xe7edff, 1.6);
-    sun.position.set(-5, 12, 5); sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
-    Object.assign(sun.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8 }); sun.shadow.bias = -.001; scene.add(sun);
+    let targetAmbient = 1.4;
     const ownedMaterials = new Set<THREE.Material>();
     const material = (color: number) => {
       const value = new THREE.MeshStandardMaterial({ color, roughness: .48, metalness: .08 });
@@ -89,13 +78,11 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
         mat, mat, surfaceInRoom(mat, x, z + d / 2 + .07), surfaceInRoom(mat, x, z - d / 2 - .07),
       ] : surfaceInRoom(mat, x, z);
       const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), surfaces);
-      mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh); return mesh;
+      mesh.position.set(x, y, z); scene.add(mesh); return mesh;
     }
     // Sketch proportions, not surveyed dimensions. All rooms share one floor.
     const slab = new THREE.Mesh(new RoundedBoxGeometry(8.3, .4, 9.9, 3, .07), base);
-    slab.position.y = -.22; slab.castShadow = true; slab.receiveShadow = true; scene.add(slab);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(100, 100), new THREE.ShadowMaterial({ opacity: .32 }));
-    ground.rotation.x = -Math.PI / 2; ground.position.y = -.44; ground.receiveShadow = true; scene.add(ground);
+    slab.position.y = -.22; scene.add(slab);
     const floorMeshes: THREE.Mesh[] = [];
     ROOMS.forEach(room => {
       const surface = material(["kitchen", "bathroom", "balcony"].includes(room.id) ? 0x93aaa3 : 0xc0c7b8);
@@ -136,7 +123,7 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
     const upholstery = material(0x768b83), linen = material(0xced0c2), wood = material(0x70786c), ceramic = material(0xb9cecb), metal = material(0x263b38);
     const rounded = (x: number, y: number, z: number, w: number, h: number, d: number, mat: THREE.Material) => {
       const mesh = new THREE.Mesh(new RoundedBoxGeometry(w, h, d, 2, Math.min(.09, h / 3)), surfaceInRoom(mat, x, z));
-      mesh.position.set(x, y, z); mesh.castShadow = true; mesh.receiveShadow = true; scene.add(mesh); return mesh;
+      mesh.position.set(x, y, z); scene.add(mesh); return mesh;
     };
     box(-2.1, .071, -1.4, 2.55, .018, 2.35, material(0x495c5c));
     rounded(-3.2, .32, -2.15, .85, .5, 2.45, upholstery);
@@ -167,7 +154,7 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
     const plant = (x: number, z: number) => {
       rounded(x, .25, z, .34, .38, .34, ceramic);
       const leaves = new THREE.Mesh(new THREE.IcosahedronGeometry(.3, 1), surfaceInRoom(material(0x427363), x, z));
-      leaves.scale.set(.85, 1.65, .85); leaves.position.set(x, .67, z); leaves.castShadow = true; scene.add(leaves);
+      leaves.scale.set(.85, 1.65, .85); leaves.position.set(x, .67, z); scene.add(leaves);
     };
     plant(-3.4, -4.25); plant(3.4, -4.18);
     rounded(1.45, .22, -4.1, .65, .27, .52, upholstery);
@@ -210,9 +197,7 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
         camera.updateProjectionMatrix(); controls.update(); animating = !settled;
       }
       ambient.intensity = THREE.MathUtils.lerp(ambient.intensity, targetAmbient, blend);
-      sun.intensity = THREE.MathUtils.lerp(sun.intensity, targetSun, blend);
-      scene.environmentIntensity = THREE.MathUtils.lerp(scene.environmentIntensity, targetEnvironment, blend);
-      animating ||= Math.abs(ambient.intensity - targetAmbient) + Math.abs(sun.intensity - targetSun) > .001;
+      animating ||= Math.abs(ambient.intensity - targetAmbient) > .001;
       lighting.forEach(item => {
         item.strength = THREE.MathUtils.lerp(item.strength, item.targetStrength, blend);
         item.color.lerp(item.targetColor, blend);
@@ -252,7 +237,7 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
       schedule();
     };
     environmentCommand.current = isNight => {
-      targetAmbient = isNight ? .65 : 1.35; targetSun = isNight ? 1.6 : 3; targetEnvironment = isNight ? .24 : .6; schedule();
+      targetAmbient = isNight ? 1.4 : 2.2; schedule();
     };
     actions.current = action => {
       destination = null;
@@ -279,7 +264,6 @@ export function HouseScene({ bulbs, selectedIp, snapshots, assignments, onSelect
       cancelAnimationFrame(frame); resize.disconnect(); controls.dispose();
       renderer.domElement.removeEventListener("pointerdown", pointerDown);
       renderer.domElement.removeEventListener("pointerup", pointerUp);
-      environmentTarget.dispose();
       const materials = ownedMaterials;
       scene.traverse(object => { if (object instanceof THREE.Mesh) { object.geometry.dispose(); (Array.isArray(object.material) ? object.material : [object.material]).forEach(mat => materials.add(mat)); } });
       materials.forEach(mat => mat.dispose()); renderer.dispose(); renderer.domElement.remove();
