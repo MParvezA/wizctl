@@ -14,8 +14,9 @@ export function useBulbState(ip: string | null) {
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    setState(null);
+    setConnected(false);
     if (!ip) {
-      setState(null);
       return;
     }
 
@@ -26,9 +27,10 @@ export function useBulbState(ip: string | null) {
       if (cancelled) return;
       socket = new WebSocket(wsUrl(ip));
 
-      socket.onopen = () => setConnected(true);
+      socket.onopen = () => { if (!cancelled) setConnected(true); };
 
       socket.onmessage = (event) => {
+        if (cancelled) return;
         try {
           const parsed = JSON.parse(event.data) as BulbState;
           setState(parsed);
@@ -38,6 +40,7 @@ export function useBulbState(ip: string | null) {
       };
 
       socket.onclose = () => {
+        if (cancelled) return;
         setConnected(false);
         if (!cancelled) {
           reconnectTimer.current = setTimeout(connect, RECONNECT_DELAY_MS);

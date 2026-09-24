@@ -9,7 +9,7 @@ interface BrightnessSliderProps {
 export function BrightnessSlider({ value, disabled, onChange }: BrightnessSliderProps) {
   const [local, setLocal] = useOptimisticValue(value, onChange, 80);
   const pct = ((local - 10) / 90) * 100;
-  const fillColor = disabled ? "#3a3d43" : "#e5e5e5";
+  const fillColor = disabled ? "var(--line)" : "var(--brand)";
 
   return (
     <div className="flex flex-col gap-2">
@@ -30,7 +30,7 @@ export function BrightnessSlider({ value, disabled, onChange }: BrightnessSlider
         onChange={(e) => setLocal(Number(e.target.value))}
         className="slider h-2 w-full cursor-pointer rounded-full disabled:cursor-not-allowed"
         style={{
-          background: `linear-gradient(to right, ${fillColor} ${pct}%, #23262c ${pct}%)`,
+          background: `linear-gradient(to right, ${fillColor} ${pct}%, var(--muted) ${pct}%)`,
         }}
       />
     </div>

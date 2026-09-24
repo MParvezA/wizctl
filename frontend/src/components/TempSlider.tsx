@@ -6,7 +6,7 @@ interface TempSliderProps {
   onChange: (kelvin: number) => void;
 }
 
-const MIN_K = 2200;
+const MIN_K = 2500;
 const MAX_K = 6500;
 
 export function TempSlider({ value, disabled, onChange }: TempSliderProps) {
@@ -36,7 +36,7 @@ export function TempSlider({ value, disabled, onChange }: TempSliderProps) {
         }}
       />
       <div className="flex justify-between font-mono mono text-[10px] text-neutral-600">
-        <span>2200K warm</span>
+        <span>2500K warm</span>
         <span>6500K cool</span>
       </div>
     </div>

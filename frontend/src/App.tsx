@@ -1,259 +1,121 @@
-import { useEffect, useMemo, useState } from "react";
-import { Glow } from "./components/Glow";
-import { BulbIcon } from "./components/BulbIcon";
-import { BulbSelector } from "./components/BulbSelector";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpRight, Box, House, Layers2, Lightbulb, ListFilter, Moon, Plus, RefreshCw, Search, SlidersHorizontal, Sun, Wifi, X } from "lucide-react";
 import { PowerToggle } from "./components/PowerToggle";
 import { BrightnessSlider } from "./components/BrightnessSlider";
 import { ColorPicker } from "./components/ColorPicker";
 import { TempSlider } from "./components/TempSlider";
-import { WhitePresets } from "./components/WhitePresets";
-import { SceneGrid } from "./components/SceneGrid";
-import { SpeedSlider } from "./components/SpeedSlider";
-import { StatusPanel } from "./components/StatusPanel";
 import { AddBulbForm } from "./components/AddBulbForm";
 import { ModeTabs, type ModeTab } from "./components/ModeTabs";
-import { useAddBulb, useBulbList, useRescan, useScenes } from "./hooks/useBulbs";
-import { useBulbState } from "./hooks/useBulbState";
+import { useAddBulb, useBulbList, useRescan } from "./hooks/useBulbs";
+import { BulbSubscription, reportedState, snapshotStatus, type LightSnapshot, type LightSnapshots } from "./components/BulbSubscription";
+import { RoomCard } from "./components/RoomCard";
 import { api } from "./lib/api";
+import { HouseScene, ROOMS, type RoomAssignments } from "./components/HouseScene";
+import { lightAppearance } from "./components/RoomLight";
 
-const LAST_IP_KEY = "wiz-controller:last-ip";
-const DEFAULT_SPEED = 100;
-
-function noop() {
-  /* commands are reflected via websocket state, not their own response */
-}
+const PRESETS = [{ name: "Relax", kelvin: 2700 }, { name: "Everyday", kelvin: 4000 }, { name: "Focus", kelvin: 6000 }];
 
 export default function App() {
-  const { data: bulbs = [], isLoading: loadingBulbs } = useBulbList();
-  const { data: scenes = [] } = useScenes();
+  const { data: bulbs = [], isLoading, isError, error } = useBulbList();
   const rescan = useRescan();
   const addBulb = useAddBulb();
-  const [showAddForm, setShowAddForm] = useState(false);
+  const addDialog = useRef<HTMLDialogElement>(null);
+  const devicesDialog = useRef<HTMLDialogElement>(null);
+  const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [resetKey, setResetKey] = useState(0);
+  const [night, setNight] = useState(true);
+  const [view, setView] = useState<"orbit" | "plan">("orbit");
+  const [query, setQuery] = useState("");
+  const [assignments, setAssignments] = useState<RoomAssignments>(() => {
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem("tapo-controller:rooms") ?? "{}");
+      if (!saved || typeof saved !== "object" || Array.isArray(saved)) return {};
+      return Object.fromEntries(Object.entries(saved).filter(([, room]) => ROOMS.some(item => item.id === room)));
+    } catch { return {}; }
+  });
+  const [commandError, setCommandError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ModeTab>("white");
+  const [snapshots, setSnapshots] = useState<LightSnapshots>({});
+  const updateSnapshot = useCallback((ip: string, snapshot: LightSnapshot | null) => {
+    setSnapshots(current => {
+      const next = { ...current };
+      if (snapshot) next[ip] = snapshot; else delete next[ip];
+      return next;
+    });
+  }, []);
+  const snapshot = selectedIp ? snapshots[selectedIp] : undefined;
+  const connected = Boolean(snapshot?.connected);
+  const state = reportedState(snapshot);
+  const selected = bulbs.find(bulb => bulb.ip === selectedIp);
+  const room = ROOMS.find(item => item.id === (selectedIp ? assignments[selectedIp] : null));
+  const ready = Boolean(selected && state?.reachable && connected);
+  const isOn = Boolean(ready && state?.on);
+  const status = snapshotStatus(snapshot);
+  const rgbValue = useMemo(() => ({ r: state?.rgb?.[0] ?? 255, g: state?.rgb?.[1] ?? 214, b: state?.rgb?.[2] ?? 170 }), [state?.rgb]);
+  const filtered = bulbs.filter(bulb => `${bulb.name} ${bulb.ip} ${ROOMS.find(item => item.id === assignments[bulb.ip])?.name ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
 
-  const [selectedIp, setSelectedIp] = useState<string | null>(() =>
-    localStorage.getItem(LAST_IP_KEY),
-  );
+  useEffect(() => {
+    if (!isLoading && !bulbs.some(bulb => bulb.ip === selectedIp)) setSelectedIp(bulbs[0]?.ip ?? null);
+  }, [bulbs, isLoading, selectedIp]);
+  useEffect(() => { setCommandError(null); }, [selectedIp]);
+  useEffect(() => {
+    if (state?.mode === "color") setActiveTab("color");
+    if (state?.mode === "temp") setActiveTab("white");
+  }, [state?.mode, selectedIp]);
 
-  const handleAddBulb = (ip: string) => {
-    addBulb.mutate(ip, {
-      onSuccess: (bulb) => {
-        setSelectedIp(bulb.ip);
-        setShowAddForm(false);
-      },
+
+  const assignRoom = (ip: string, id: string) => {
+    const next = { ...assignments, [ip]: id }; setAssignments(next);
+    try { localStorage.setItem("tapo-controller:rooms", JSON.stringify(next)); }
+    catch { setCommandError("Room assigned for this session. Browser storage is unavailable."); }
+  };
+  const send = (operation: Promise<unknown>) => {
+    const ip = selectedIp;
+    setCommandError(null);
+    operation.catch((failure: unknown) => {
+      if (activeIp.current === ip) setCommandError(failure instanceof Error ? failure.message : "Command failed.");
     });
   };
+  const activeIp = useRef(selectedIp); activeIp.current = selectedIp;
+  const selectLight = (ip: string) => { setSelectedIp(ip); devicesDialog.current?.close(); };
+  const showAdd = () => { devicesDialog.current?.close(); addBulb.reset(); addDialog.current?.showModal(); };
+  const add = (ip: string) => addBulb.mutate(ip, { onSuccess: bulb => { selectLight(bulb.ip); addDialog.current?.close(); } });
+  const homeView = () => { setView("orbit"); setResetKey(value => value + 1); };
 
-  useEffect(() => {
-    if (selectedIp) return;
-    if (bulbs.length > 0) setSelectedIp(bulbs[0].ip);
-  }, [bulbs, selectedIp]);
+  return <div className={`spatial-app ${selected ? "room-focused" : ""} ${night ? "night" : "studio"}`}>
+    {bulbs.map(bulb => <BulbSubscription key={bulb.ip} ip={bulb.ip} onUpdate={updateSnapshot} />)}
+    <header className="spatial-header">
+      <button className="brand" title="Home view" aria-label="Home view" onClick={homeView}><span className="brand-mark"><House size={21} /></span><span>tapo<span className="brand-suffix">home</span></span></button>
+      <span className="header-address">PARVEZ'S APARTMENT <i /> 61 m<sup>2</sup></span>
+      <div className="header-actions"><span className={`connection-label ${!isError ? "online" : ""}`}><Wifi size={15} />{isError ? "Controller offline" : isLoading ? "Connecting" : "Local controller"}</span><button className="icon-button" aria-label="Manage lights" title="Manage lights" onClick={() => devicesDialog.current?.showModal()}><ListFilter size={18} /></button><button className="icon-button" aria-label={night ? "Studio lighting" : "Night lighting"} title={night ? "Studio lighting" : "Night lighting"} aria-pressed={night} onClick={() => setNight(value => !value)}>{night ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" title="Refresh lights" aria-label="Refresh lights" disabled={rescan.isPending} onClick={() => rescan.mutate()}><RefreshCw size={16} className={rescan.isPending ? "spinning" : ""} /></button></div>
+    </header>
 
-  useEffect(() => {
-    if (bulbs.length === 0) return;
-    if (selectedIp && !bulbs.some((b) => b.ip === selectedIp)) {
-      setSelectedIp(bulbs[0].ip);
-    }
-  }, [bulbs, selectedIp]);
+    <main className="spatial-world">
+      <div className="world-heading"><p className="eyebrow">HOME / LIGHTING</p><h1>Apartment</h1><span>Single floor / 61 m<sup>2</sup></span></div>
+      <div className="view-switch" role="group" aria-label="Camera view"><button title="3D view" aria-label="3D view" aria-pressed={view === "orbit"} onClick={() => setView("orbit")}><Box size={17} /></button><button title="Floor plan" aria-label="Floor plan" aria-pressed={view === "plan"} onClick={() => setView("plan")}><Layers2 size={17} /></button></div>
+      <HouseScene assignments={assignments} bulbs={bulbs} selectedIp={selectedIp} snapshots={snapshots} onSelect={selectLight} resetKey={resetKey} night={night} view={view} onHome={homeView} />
+      {(isError || rescan.isError) && <div className="world-alert" role="alert">{(error ?? rescan.error)?.message ?? "Controller unavailable"}<button onClick={() => rescan.mutate()}>Retry</button></div>}
 
-  useEffect(() => {
-    if (selectedIp) localStorage.setItem(LAST_IP_KEY, selectedIp);
-  }, [selectedIp]);
+      {selected && <section className="control-panel" aria-labelledby="control-heading" key={selectedIp}>
+        <div className="sheet-handle" />
+        <div className="panel-heading"><span className="panel-eyebrow"><SlidersHorizontal size={13} />LIGHTING</span><span className="panel-room-name">{room?.name ?? "Unassigned"}</span></div>
+        <div className="light-identity"><span className="light-emblem" style={{ color: ready && isOn ? lightAppearance(state).color : undefined }}><Lightbulb size={27} strokeWidth={1.4} /></span><div><h2 id="control-heading">{selected.name}</h2><span className="panel-status"><i className={ready && isOn ? "lit" : ""} />{status}<span>{selected.ip}</span></span></div><PowerToggle on={isOn} disabled={!ready} onToggle={on => send(api.setPower(selected.ip, on))} /></div>
+        {commandError && <p role="alert" className="control-error">{commandError}</p>}
+        {state?.message && !state.reachable && <p role="status" className="control-error">{state.message}</p>}
+        <div className="control-section"><BrightnessSlider value={state?.brightness ?? 50} disabled={!ready} onChange={value => send(api.setBrightness(selected.ip, value))} /></div>
+        <div className="control-section"><ModeTabs active={activeTab} disabled={!ready} onSelect={setActiveTab} /><div className="mode-content">{activeTab === "white" ? <><TempSlider value={state?.kelvin || 2700} disabled={!ready} onChange={value => send(api.setTemp(selected.ip, value))} /><div className="preset-list">{PRESETS.map(preset => <button key={preset.name} disabled={!ready} aria-pressed={state?.mode === "temp" && state.kelvin === preset.kelvin} onClick={() => send(api.setTemp(selected.ip, preset.kelvin))}><span className={`temperature-swatch temperature-${preset.name.toLowerCase()}`} /><span>{preset.name}</span><small>{preset.kelvin} K</small></button>)}</div></> : <ColorPicker value={rgbValue} disabled={!ready} onChange={({ r, g, b }) => send(api.setColor(selected.ip, r, g, b))} />}</div></div>
+        <div className="room-assignment"><label htmlFor="bulb-room">Room</label><select id="bulb-room" value={assignments[selected.ip] ?? ""} onChange={event => assignRoom(selected.ip, event.target.value)}><option value="">Unassigned</option>{ROOMS.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
+        <div className="panel-footer"><Wifi size={12} /><span>{connected ? "Live connection" : "Reconnecting"}</span><span>TAPO / LAN</span></div>
+      </section>}
+      {!selected && <section className="control-panel empty-panel"><Lightbulb size={30} /><h2>{isError ? "Controller unavailable" : "No lights configured"}</h2><button className="text-button" onClick={showAdd}><Plus size={16} />Add light</button></section>}
+    </main>
 
-  const { state, connected } = useBulbState(selectedIp);
+    <section className="room-strip" aria-label="Room lighting">
+      <div className="room-strip-heading"><span>YOUR LIGHTS <small>{bulbs.length.toString().padStart(2, "0")}</small></span><button className="text-button" onClick={showAdd}><Plus size={14} />Add light</button></div>
+      <div className="room-cards">{bulbs.map(bulb => <RoomCard key={bulb.ip} bulb={bulb} roomName={ROOMS.find(item => item.id === assignments[bulb.ip])?.name} snapshot={snapshots[bulb.ip]} selected={bulb.ip === selectedIp} onSelect={selectLight} />)}{!bulbs.length && <p className="empty-state">{isLoading ? "Connecting..." : isError ? "Controller unavailable" : "No lights configured"}</p>}</div>
+    </section>
 
-  const dynamicScenes = useMemo(() => scenes.filter((s) => s.dynamic), [scenes]);
-  const whiteScenes = useMemo(() => scenes.filter((s) => !s.dynamic), [scenes]);
-
-  const [activeTab, setActiveTab] = useState<ModeTab>("white");
-
-  // Mirror the bulb's real mode into the tab whenever it actually changes —
-  // e.g. someone picked a scene from the official app — so the UI keeps
-  // showing what the bulb is really doing rather than what was last clicked
-  // here. A no-op if the tab already matches.
-  useEffect(() => {
-    if (!state) return;
-    if (state.mode === "color") setActiveTab("color");
-    else if (state.mode === "temp") setActiveTab("white");
-    else if (state.mode === "scene") setActiveTab("scenes");
-  }, [state?.mode]);
-
-  const rgbValue = useMemo<{ r: number; g: number; b: number }>(() => {
-    if (state?.rgb) return { r: state.rgb[0], g: state.rgb[1], b: state.rgb[2] };
-    return { r: 255, g: 214, b: 170 };
-  }, [state?.rgb]);
-
-  const kelvinValue = state?.kelvin ?? 2700;
-  const brightnessValue = state?.brightness ?? 100;
-  const isOn = state?.on ?? false;
-  const isReachable = state?.reachable ?? false;
-  const controlsDisabled = !selectedIp || !isReachable;
-
-  const activeSceneId = state?.mode === "scene" ? (state.sceneId ?? null) : null;
-  const activeSceneIsDynamic =
-    activeSceneId != null && dynamicScenes.some((s) => s.id === activeSceneId);
-  const speedValue = state?.speed ?? DEFAULT_SPEED;
-
-  const handleSelectScene = (sceneId: number) => {
-    if (!selectedIp) return;
-    const isDynamic = dynamicScenes.some((s) => s.id === sceneId);
-    api.setScene(selectedIp, sceneId, isDynamic ? speedValue : undefined).catch(noop);
-  };
-
-  const handleSpeedChange = (speed: number) => {
-    if (!selectedIp || activeSceneId == null) return;
-    api.setScene(selectedIp, activeSceneId, speed).catch(noop);
-  };
-
-  if (!loadingBulbs && bulbs.length === 0) {
-    return (
-      <div className="relative flex min-h-dvh items-center justify-center px-6 py-12">
-        <Glow state={null} />
-        <div className="relative max-w-sm text-center">
-          <h1 className="text-lg font-medium text-neutral-200">No bulbs found</h1>
-          <p className="mt-2 text-sm text-neutral-500">
-            Is Local Control enabled in the WiZ app, and is this machine on the same
-            2.4GHz network as your bulbs?
-          </p>
-          <button
-            onClick={() => rescan.mutate()}
-            disabled={rescan.isPending}
-            className="mt-5 rounded-full border border-room-600 bg-room-800 px-4 py-2 text-sm text-neutral-300 transition-colors hover:bg-room-700 disabled:opacity-50"
-          >
-            {rescan.isPending ? "Scanning…" : "Rescan"}
-          </button>
-
-          <div className="mt-8 flex flex-col items-center gap-3">
-            <p className="text-xs text-neutral-600">
-              Know the bulb's IP already? Broadcast discovery can fail on some
-              networks (common on Mac Wi-Fi) even when the bulb is reachable directly.
-            </p>
-            <AddBulbForm
-              pending={addBulb.isPending}
-              error={addBulb.isError ? (addBulb.error as Error).message : null}
-              onAdd={handleAddBulb}
-            />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="relative min-h-dvh">
-      <Glow state={state} />
-
-      <div className="relative mx-auto flex w-full max-w-lg flex-col px-5 py-8 sm:py-12">
-        <header className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-sm font-medium tracking-wide text-neutral-400">WiZ</h1>
-            <p className="font-mono mono text-[11px] text-neutral-600">local control</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <BulbSelector
-              bulbs={bulbs}
-              selectedIp={selectedIp ?? ""}
-              onSelect={setSelectedIp}
-            />
-            <button
-              onClick={() => setShowAddForm((v) => !v)}
-              className="shrink-0 text-xs text-neutral-500 transition-colors hover:text-neutral-300"
-            >
-              {showAddForm ? "cancel" : "+ add by IP"}
-            </button>
-          </div>
-        </header>
-
-        {showAddForm && (
-          <div className="mt-4 flex justify-end">
-            <AddBulbForm
-              pending={addBulb.isPending}
-              error={addBulb.isError ? (addBulb.error as Error).message : null}
-              onAdd={handleAddBulb}
-            />
-          </div>
-        )}
-
-        <div className="flex items-center justify-center py-8 sm:py-10">
-          <BulbIcon state={state} />
-        </div>
-
-        <div className="flex flex-col gap-6 rounded-3xl border border-room-700 bg-room-900/70 p-5 backdrop-blur-md sm:p-6">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-neutral-400">Power</span>
-            <PowerToggle
-              on={isOn}
-              disabled={!selectedIp || !isReachable}
-              onToggle={(on) => {
-                if (!selectedIp) return;
-                api.setPower(selectedIp, on).catch(noop);
-              }}
-            />
-          </div>
-
-          <StatusPanel state={state} wsConnected={connected} />
-
-          <div className="h-px bg-room-700" />
-
-          <BrightnessSlider
-            value={brightnessValue}
-            disabled={controlsDisabled}
-            onChange={(brightness) => {
-              if (!selectedIp) return;
-              api.setBrightness(selectedIp, brightness).catch(noop);
-            }}
-          />
-
-          <div className="h-px bg-room-700" />
-
-          <ModeTabs active={activeTab} disabled={controlsDisabled} onSelect={setActiveTab} />
-
-          {activeTab === "white" && (
-            <div className="flex flex-col gap-6">
-              <TempSlider
-                value={kelvinValue}
-                disabled={controlsDisabled}
-                onChange={(kelvin) => {
-                  if (!selectedIp) return;
-                  api.setTemp(selectedIp, kelvin).catch(noop);
-                }}
-              />
-              <WhitePresets
-                presets={whiteScenes}
-                activeSceneId={activeSceneId}
-                disabled={controlsDisabled}
-                onSelect={handleSelectScene}
-              />
-            </div>
-          )}
-
-          {activeTab === "color" && (
-            <ColorPicker
-              value={rgbValue}
-              disabled={controlsDisabled}
-              onChange={({ r, g, b }) => {
-                if (!selectedIp) return;
-                api.setColor(selectedIp, r, g, b).catch(noop);
-              }}
-            />
-          )}
-
-          {activeTab === "scenes" && (
-            <div className="flex flex-col gap-6">
-              <SceneGrid
-                scenes={dynamicScenes}
-                activeSceneId={activeSceneId}
-                disabled={controlsDisabled}
-                onSelect={handleSelectScene}
-              />
-              <SpeedSlider
-                value={speedValue}
-                disabled={controlsDisabled || !activeSceneIsDynamic}
-                onChange={handleSpeedChange}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
+    <dialog ref={devicesDialog} className="devices-dialog" onClick={event => { if (event.target === devicesDialog.current) devicesDialog.current.close(); }}><div className="dialog-heading"><div><p className="eyebrow">YOUR DEVICES</p><h2>Lights <span>{bulbs.length}</span></h2></div><button className="icon-button" aria-label="Close devices" title="Close" onClick={() => devicesDialog.current?.close()}><X size={19} /></button></div><label className="search-field"><Search size={16} /><input type="search" aria-label="Search lights and rooms" placeholder="Search lights or rooms" value={query} onChange={event => setQuery(event.target.value)} /></label><div className="device-list">{filtered.map(bulb => <button key={bulb.ip} onClick={() => selectLight(bulb.ip)}><Lightbulb size={18} /><span><strong>{bulb.name}</strong><small>{ROOMS.find(item => item.id === assignments[bulb.ip])?.name ?? "Unassigned"} / {bulb.ip}</small></span><ArrowUpRight size={16} /></button>)}{!filtered.length && <p className="empty-state">{bulbs.length ? "No matching lights" : "No lights configured"}</p>}</div><button className="text-button" onClick={showAdd}><Plus size={16} />Add light</button><footer className="template-credit">Theme foundations: <a href="https://themewagon.com/themes/smart-home/" target="_blank" rel="noreferrer">SmartHome / ThemeWagon</a></footer></dialog>
+    <dialog ref={addDialog} className="add-dialog" onClick={event => { if (event.target === addDialog.current) addDialog.current.close(); }}><div className="dialog-heading"><h2>Add a light</h2><button className="icon-button" aria-label="Close add light" title="Close" onClick={() => addDialog.current?.close()}><X size={19} /></button></div><AddBulbForm pending={addBulb.isPending} error={addBulb.isError ? addBulb.error.message : null} onAdd={add} /></dialog>
+  </div>;
 }

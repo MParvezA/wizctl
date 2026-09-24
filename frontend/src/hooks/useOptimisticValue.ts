@@ -18,6 +18,10 @@ export function useOptimisticValue<T>(
   const dragging = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
   useEffect(() => {
     if (!dragging.current) setLocal(serverValue);
   }, [serverValue]);

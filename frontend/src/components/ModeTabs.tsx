@@ -1,4 +1,4 @@
-export type ModeTab = "white" | "color" | "scenes";
+export type ModeTab = "white" | "color";
 
 interface ModeTabsProps {
   active: ModeTab;
@@ -9,7 +9,6 @@ interface ModeTabsProps {
 const TABS: { key: ModeTab; label: string }[] = [
   { key: "white", label: "White" },
   { key: "color", label: "Color" },
-  { key: "scenes", label: "Scenes" },
 ];
 
 export function ModeTabs({ active, disabled, onSelect }: ModeTabsProps) {
@@ -17,7 +16,7 @@ export function ModeTabs({ active, disabled, onSelect }: ModeTabsProps) {
     <div
       role="tablist"
       aria-label="Light mode"
-      className="grid grid-cols-3 gap-1 rounded-full border border-room-600 bg-room-800/60 p-1"
+      className="grid grid-cols-2 gap-1 rounded-full border border-room-600 bg-room-800/60 p-1"
     >
       {TABS.map((tab) => {
         const isActive = tab.key === active;

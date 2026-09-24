@@ -1,5 +1,6 @@
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from ipaddress import IPv4Address
+from pydantic import BaseModel, Field, field_validator
 
 
 class BulbInfo(BaseModel):
@@ -10,6 +11,11 @@ class BulbInfo(BaseModel):
 
 class AddBulbRequest(BaseModel):
     ip: str
+
+    @field_validator("ip")
+    @classmethod
+    def validate_ip(cls, value: str) -> str:
+        return str(IPv4Address(value.strip()))
 
 
 class BulbState(BaseModel):
@@ -42,7 +48,7 @@ class ColorRequest(BaseModel):
 
 
 class TempRequest(BaseModel):
-    kelvin: int = Field(ge=2200, le=6500)
+    kelvin: int = Field(ge=2500, le=6500)
 
 
 class SceneRequest(BaseModel):
