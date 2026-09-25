@@ -8,3 +8,5 @@ frontend/dist/
 frontend/tsconfig.tsbuildinfo
 
 .DS_Store
+
+backend/data/

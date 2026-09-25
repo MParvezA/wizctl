@@ -5,6 +5,7 @@ export function useBulbList() {
   return useQuery({
     queryKey: ["bulbs"],
     queryFn: api.getBulbs,
+    refetchInterval: 5000,
   });
 }
 

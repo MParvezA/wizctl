@@ -4,12 +4,14 @@ export interface BulbInfo {
   name: string;
 }
 
-export type BulbMode = "color" | "temp" | "scene" | "unknown";
+export type BulbMode = "color" | "temp" | "white" | "scene" | "unknown";
 
 export interface BulbState {
   ip: string;
   on: boolean;
   brightness: number;
+  supportsColor: boolean;
+  supportsColorTemp: boolean;
   mode: BulbMode;
   rgb: [number, number, number] | null;
   kelvin: number | null;

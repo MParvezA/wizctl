@@ -1,3 +1,32 @@
+# Tapo Home
+
+The current app controls Tapo dimmable lights by IP using `python-kasa`,
+including the fixed-white L510 and color bulbs. Power and brightness are
+available for all supported lights; color and temperature controls appear
+only when the bulb supports them.
+
+Set `KASA_USERNAME` and `KASA_PASSWORD` in the backend environment on every
+startup (your Tapo account credentials). Pair the bulb with Wi-Fi in the
+Tapo app first and enable Third-Party Compatibility if the device requires it.
+
+Lights added successfully through **Add light** are saved automatically to
+`backend/data/bulbs.json` and loaded when the backend restarts. The path is
+independent of the working directory. Set `TAPO_BULBS_FILE` to use a different
+persistent file; preserve that file across deployments. Credentials and light
+power/brightness settings are not stored there: the app reads the actual state
+from each bulb after reconnecting. `TAPO_HOSTS` can also seed comma-separated IPs.
+Previously added lights that were lost before this update must be added once
+again. Room assignments remain in this browser's local storage. Reserve bulb
+IPs in your router so DHCP changes do not break saved addresses.
+
+The older upstream WiZ documentation below is retained for reference; its
+WiZ discovery, credentials, temperature limits and scene support do not apply
+to the current Tapo adapter. Use the development/build commands below after
+setting the Tapo credentials. The current temperature API accepts 2500–6500 K
+and also checks the bulb's range; WiZ scene endpoints are unsupported.
+
+---
+
 # wizctl
 
 A self-hosted web app for controlling Philips WiZ smart bulbs over your local

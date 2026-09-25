@@ -1,6 +1,8 @@
 import asyncio
 import os
 import unittest
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -70,7 +72,10 @@ class FakeBulb:
 
 class ManagerTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.manager = TapoManager()
+        self.storage = tempfile.TemporaryDirectory()
+        self.addCleanup(self.storage.cleanup)
+        self.storage_path = Path(self.storage.name) / "bulbs.json"
+        self.manager = TapoManager(self.storage_path)
         with patch.dict(os.environ, {"KASA_USERNAME": "test", "KASA_PASSWORD": "test", "TAPO_HOSTS": IP}):
             self.manager.configure()
         self.bulb = FakeBulb()
@@ -127,11 +132,60 @@ class ManagerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((await self.manager.get_state(IP)).reachable)
         self.assertTrue(self.bulb.closed)
 
-    async def test_non_color_bulb_is_explicitly_rejected(self):
-        self.bulb.light.has_feature = lambda f: f == "brightness"
+    async def test_non_light_is_explicitly_rejected(self):
+        self.bulb.modules = {}
         with self.assertRaises(UnsupportedBulb):
             await self.manager.add_bulb_by_ip(IP)
         self.assertTrue(self.bulb.closed)
+
+    async def test_l510_add_power_brightness_and_unsupported_controls(self):
+        self.bulb.light.has_feature = lambda f: f == "brightness"
+        del self.bulb.light.color_temp
+        del self.bulb.light.hsv
+        await self.manager.add_bulb_by_ip(IP)
+        state = await self.manager.command(IP, "brightness", 65)
+        self.assertEqual(state.brightness, 65)
+        self.assertEqual(state.mode, "white")
+        self.assertFalse(state.supportsColor)
+        self.assertFalse(state.supportsColorTemp)
+        self.assertIsNone(state.rgb)
+        self.assertIsNone(state.kelvin)
+        self.assertFalse((await self.manager.command(IP, "power", False)).on)
+        for action, args in [("color", (255, 0, 0)), ("temp", (3000,))]:
+            with self.assertRaises(UnsupportedBulb):
+                await self.manager.command(IP, action, *args)
+        self.assertFalse(self.bulb.closed)
+        self.assertTrue((await self.manager.get_state(IP)).reachable)
+
+    async def test_saved_bulbs_survive_restart_without_hosts_and_reconnect(self):
+        await self.manager.add_bulb_by_ip(IP)
+        await self.manager.close()
+        restarted = TapoManager(self.storage_path)
+        with patch.dict(os.environ, {"KASA_USERNAME": "test", "KASA_PASSWORD": "test", "TAPO_HOSTS": ""}):
+            restarted.configure()
+        self.assertTrue(restarted.contains(IP))
+        self.assertEqual(restarted.list_bulbs()[0].name, "Bedroom")
+        self.bulb.fail_update = True
+        self.assertFalse((await restarted.get_state(IP, force=True)).reachable)
+        self.assertTrue(restarted.contains(IP))
+        self.bulb.fail_update = False
+        self.assertTrue((await restarted.get_state(IP, force=True)).reachable)
+        await restarted.close()
+        self.assertNotIn("password", self.storage_path.read_text())
+
+    async def test_failed_add_is_not_saved(self):
+        self.bulb.fail_update = True
+        with self.assertRaises(BulbUnreachable):
+            await self.manager.add_bulb_by_ip("192.168.1.50")
+        self.assertFalse(self.storage_path.exists())
+        self.assertFalse(self.manager.contains("192.168.1.50"))
+
+    def test_corrupt_storage_is_not_silently_overwritten(self):
+        self.storage_path.write_text("broken json")
+        with patch.dict(os.environ, {"KASA_USERNAME": "test", "KASA_PASSWORD": "test"}):
+            with self.assertRaisesRegex(RuntimeError, "Cannot load saved bulbs"):
+                TapoManager(self.storage_path).configure()
+        self.assertEqual(self.storage_path.read_text(), "broken json")
 
     async def test_duplicate_add_retains_single_bulb(self):
         await self.manager.add_bulb_by_ip(IP)

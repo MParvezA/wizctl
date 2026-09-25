@@ -22,7 +22,9 @@ class BulbState(BaseModel):
     ip: str
     on: bool
     brightness: int = Field(ge=0, le=100)
-    mode: Literal["color", "temp", "scene", "unknown"]
+    mode: Literal["color", "temp", "white", "scene", "unknown"]
+    supportsColor: bool = False
+    supportsColorTemp: bool = False
     rgb: Optional[tuple[int, int, int]] = None
     kelvin: Optional[int] = None
     sceneId: Optional[int] = None

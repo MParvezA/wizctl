@@ -50,6 +50,9 @@ export default function App() {
   const room = ROOMS.find(item => item.id === (selectedIp ? assignments[selectedIp] : null));
   const ready = Boolean(selected && state?.reachable && connected);
   const isOn = Boolean(ready && state?.on);
+  const supportsColor = state?.supportsColor ?? false;
+  const supportsColorTemp = state?.supportsColorTemp ?? false;
+  const visibleTab = activeTab === "color" && supportsColor ? "color" : supportsColorTemp ? "white" : "color";
   const status = snapshotStatus(snapshot);
   const rgbValue = useMemo(() => ({ r: state?.rgb?.[0] ?? 255, g: state?.rgb?.[1] ?? 214, b: state?.rgb?.[2] ?? 170 }), [state?.rgb]);
   const filtered = bulbs.filter(bulb => `${bulb.name} ${bulb.ip} ${ROOMS.find(item => item.id === assignments[bulb.ip])?.name ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
@@ -60,7 +63,7 @@ export default function App() {
   useEffect(() => { setCommandError(null); }, [selectedIp]);
   useEffect(() => {
     if (state?.mode === "color") setActiveTab("color");
-    if (state?.mode === "temp") setActiveTab("white");
+    if (state?.mode === "temp" || state?.mode === "white") setActiveTab("white");
   }, [state?.mode, selectedIp]);
 
 
@@ -103,7 +106,7 @@ export default function App() {
         {commandError && <p role="alert" className="control-error">{commandError}</p>}
         {state?.message && !state.reachable && <p role="status" className="control-error">{state.message}</p>}
         <div className="control-section"><BrightnessSlider value={state?.brightness ?? 50} disabled={!ready} onChange={value => send(api.setBrightness(selected.ip, value))} /></div>
-        <div className="control-section"><ModeTabs active={activeTab} disabled={!ready} onSelect={setActiveTab} /><div className="mode-content">{activeTab === "white" ? <><TempSlider value={state?.kelvin || 2700} disabled={!ready} onChange={value => send(api.setTemp(selected.ip, value))} /><div className="preset-list">{PRESETS.map(preset => <button key={preset.name} disabled={!ready} aria-pressed={state?.mode === "temp" && state.kelvin === preset.kelvin} onClick={() => send(api.setTemp(selected.ip, preset.kelvin))}><span className={`temperature-swatch temperature-${preset.name.toLowerCase()}`} /><span>{preset.name}</span><small>{preset.kelvin} K</small></button>)}</div></> : <ColorPicker value={rgbValue} disabled={!ready} onChange={({ r, g, b }) => send(api.setColor(selected.ip, r, g, b))} />}</div></div>
+        <div className="control-section"><ModeTabs active={visibleTab} disabled={!ready} supportsColor={supportsColor} supportsColorTemp={supportsColorTemp} onSelect={setActiveTab} />{supportsColor || supportsColorTemp ? <div className="mode-content">{visibleTab === "white" ? <><TempSlider value={state?.kelvin || 2700} disabled={!ready} onChange={value => send(api.setTemp(selected.ip, value))} /><div className="preset-list">{PRESETS.map(preset => <button key={preset.name} disabled={!ready} aria-pressed={state?.mode === "temp" && state.kelvin === preset.kelvin} onClick={() => send(api.setTemp(selected.ip, preset.kelvin))}><span className={`temperature-swatch temperature-${preset.name.toLowerCase()}`} /><span>{preset.name}</span><small>{preset.kelvin} K</small></button>)}</div></> : <ColorPicker value={rgbValue} disabled={!ready} onChange={({ r, g, b }) => send(api.setColor(selected.ip, r, g, b))} />}</div> : <p className="text-sm text-neutral-400">{state?.mode === "white" ? "Fixed white light. Adjust its power and brightness above." : "Waiting for light capabilities."}</p>}</div>
         <div className="room-assignment"><label htmlFor="bulb-room">Room</label><select id="bulb-room" value={assignments[selected.ip] ?? ""} onChange={event => assignRoom(selected.ip, event.target.value)}><option value="">Unassigned</option>{ROOMS.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></div>
         <div className="panel-footer"><Wifi size={12} /><span>{connected ? "Live connection" : "Reconnecting"}</span><span>TAPO / LAN</span></div>
       </section>}
